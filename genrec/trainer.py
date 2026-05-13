@@ -57,8 +57,10 @@ class Trainer:
         # Initialize fine-grained evaluator if enabled
         self.do_fine_grained_eval = self.config.get('eval_fine_grained', False) and split_datasets is not None
         
+        # Always initialize metric for evaluation
+        self.fine_grained_metric = self.config.get('fine_grained_metric', 'ndcg@10')
+        
         if self.do_fine_grained_eval:
-            self.fine_grained_metric = self.config.get('fine_grained_metric', 'ndcg@10')
             self.max_hop = self.config.get('max_hop', 4)
             self.fine_grained_evaluator = FineGrainedEvaluator(
                 train_item_seqs=split_datasets['train']['item_seq'],
