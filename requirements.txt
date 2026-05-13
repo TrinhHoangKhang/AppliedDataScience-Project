@@ -3,6 +3,7 @@ transformers==4.57.0
 sentence-transformers==3.0.0
 datasets==4.8.4
 accelerate==1.12.0
+faiss-cpu
 numpy==1.26.4
 pandas==2.3.3
 scikit-learn==1.7.2
