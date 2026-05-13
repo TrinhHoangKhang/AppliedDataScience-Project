@@ -13,7 +13,6 @@ from accelerate import Accelerator
 from genrec.model import AbstractModel
 from genrec.tokenizer import AbstractTokenizer
 from genrec.evaluator import Evaluator
-from mem_gen_categorizer import FineGrainedEvaluator
 from genrec.utils import get_file_name, get_total_steps, config_for_log, log
 
 
@@ -58,6 +57,7 @@ class Trainer:
         self.do_fine_grained_eval = self.config.get('eval_fine_grained', False) and split_datasets is not None
         
         if self.do_fine_grained_eval:
+            from mem_gen_categorizer import FineGrainedEvaluator
             self.fine_grained_metric = self.config.get('fine_grained_metric', 'ndcg@10')
             self.max_hop = self.config.get('max_hop', 4)
             self.fine_grained_evaluator = FineGrainedEvaluator(
