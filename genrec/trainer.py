@@ -13,6 +13,7 @@ from accelerate import Accelerator
 from genrec.model import AbstractModel
 from genrec.tokenizer import AbstractTokenizer
 from genrec.evaluator import Evaluator
+from mem_gen_categorizer import FineGrainedEvaluator
 from genrec.utils import get_file_name, get_total_steps, config_for_log, log
 
 
@@ -53,9 +54,35 @@ class Trainer:
         )
         os.makedirs(os.path.dirname(self.saved_model_ckpt), exist_ok=True)
         
-        # Fine-grained evaluation is disabled
-        self.do_fine_grained_eval = False
+        # Initialize fine-grained evaluator if enabled
+        self.do_fine_grained_eval = self.config.get('eval_fine_grained', False) and split_datasets is not None
         
+        if self.do_fine_grained_eval:
+            self.fine_grained_metric = self.config.get('fine_grained_metric', 'ndcg@10')
+            self.max_hop = self.config.get('max_hop', 4)
+            self.fine_grained_evaluator = FineGrainedEvaluator(
+                train_item_seqs=split_datasets['train']['item_seq'],
+                max_hop=self.max_hop
+            )
+            self.split_datasets = split_datasets
+            
+            # Build reverse mapping for (Tokens -> ItemID)
+            assert hasattr(self.tokenizer, 'item2tokens'), "Tokenizer must have item2tokens attribute"
+            self.tokens2item = {v if isinstance(v, int) else tuple(v): k for k, v in self.tokenizer.item2tokens.items()}
+            
+            # Pre-compute labels and ratios for all splits
+            self.case_labels = {}
+            self.fine_grained_ratios = {}
+            for split in ['val', 'test']:
+                self.case_labels[split] = {}
+                for idx, item_seq in enumerate(self.split_datasets[split]['item_seq']):
+                    self.case_labels[split][idx] = self.fine_grained_evaluator.get_case_labels(item_seq)
+                
+                # Compute static ratios using evaluator
+                self.fine_grained_ratios[split] = self.fine_grained_evaluator.compute_pattern_statistics(
+                    self.split_datasets[split]['item_seq']
+                )
+            
         # Set up CSV file for logging evaluation results
         log_dir = os.path.join(self.config['log_dir'], 'fine_grained_results')
         os.makedirs(log_dir, exist_ok=True)
