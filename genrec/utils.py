@@ -7,6 +7,7 @@ import html
 import hashlib
 import datetime
 import requests
+import tiktoken
 from typing import Union, Optional
 import logging
 from logging import getLogger
@@ -18,7 +19,6 @@ from accelerate.utils import set_seed
 
 def init_seed(seed, reproducibility):
     r"""init random seed for random functions in numpy, torch, cuda and cudnn
-        This function is taken from https://github.com/RUCAIBox/RecBole/blob/2b6e209372a1a666fe7207e6c2a96c7c3d49b427/recbole/utils/utils.py#L188-L205
 
     Args:
         seed (int): random seed
@@ -61,11 +61,9 @@ def get_command_line_args_str():
 def get_file_name(config: dict, suffix: str = ''):
     config_str = "".join([str(value) for key, value in config.items() if key != 'accelerator'])
     md5 = hashlib.md5(config_str.encode(encoding="utf-8")).hexdigest()[:6]
-    
-    # Keep only essential info: dataset, model, config file, time, and experiment id
-    essential_info = f"{config['dataset']}_{config['model']}_{config.get('config', 'default')}"
+    command_line_args = get_command_line_args_str()
     logfilename = "{}-{}-{}-{}{}".format(
-        config["run_id"], essential_info, config['run_local_time'], md5, suffix
+        config["run_id"], command_line_args, config['run_local_time'], md5, suffix
     )
     return logfilename
 
@@ -79,6 +77,8 @@ def init_logger(config: dict):
     os.makedirs(model_name, exist_ok=True)
 
     logfilename = get_file_name(config, suffix='.log')
+    if len(logfilename) > 255:
+        logfilename = logfilename[:245] + logfilename[-10:]
     logfilepath = os.path.join(LOGROOT, config["dataset"], config["model"], logfilename)
 
     filefmt = "%(asctime)-15s %(levelname)s  %(message)s"
@@ -441,11 +441,6 @@ def clean_text(raw_text: str) -> str:
     text = list_to_str(raw_text)
     text = html.unescape(text)
     text = text.strip()
-
-    # Remove unicode markers (u', u") and surrounding quotes
-    text = re.sub(r"u['\"]", "", text)    
-    text = re.sub(r"^['\"]|['\"]$", "", text)
-    
     text = re.sub(r'<[^>]+>', '', text)
     text = re.sub(r'[\n\t]', ' ', text)
     text = re.sub(r' +', ' ', text)
@@ -475,3 +470,10 @@ def config_for_log(config: dict) -> dict:
         if isinstance(v, list):
             config[k] = str(v)
     return config
+
+
+def num_tokens_from_string(string: str, encoding_name: str) -> int:
+    """Returns the number of tokens in a text string."""
+    encoding = tiktoken.get_encoding(encoding_name)
+    num_tokens = len(encoding.encode(string))
+    return num_tokens

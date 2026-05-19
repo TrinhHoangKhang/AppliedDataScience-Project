@@ -7,13 +7,8 @@ class Evaluator:
         self.tokenizer = tokenizer
         self.metric2func = {
             'recall': self.recall_at_k,
-            'ndcg': self.ndcg_at_k,
-            'err': self.err_at_k
+            'ndcg': self.ndcg_at_k
         }
-
-        self.legal_preds = set()
-        for iid, tokens in self.tokenizer.item2tokens.items():
-            self.legal_preds.add(tokens)
 
         self.eos_token = self.tokenizer.eos_token
         self.maxk = max(config['topk'])
@@ -46,28 +41,15 @@ class Evaluator:
         dcg = torch.where(pos_index, dcg, 0)
         return dcg[:, :k].sum(dim=1).cpu().float()
 
-    def err_at_k(self, preds, k):
-        """
-        Calculate the percentage illegal predictions
-        among the top k generated token sequences.
-        """
-        ret = []
-        for i in range(preds.shape[0]):
-            n_illegal_preds = 0
-            for j in range(k):
-                cur_pred = tuple(preds[i, j].tolist())
-                if cur_pred not in self.legal_preds:
-                    n_illegal_preds += 1
-            ret.append(n_illegal_preds / k)
-        return torch.FloatTensor(ret)
-
     def calculate_metrics(self, preds, labels):
+        if isinstance(preds, tuple):
+            preds, n_visited_items = preds
+        else:
+            n_visited_items = torch.FloatTensor([len(self.tokenizer.item2tokens)] * preds.shape[0])
         results = {}
         pos_index = self.calculate_pos_index(preds, labels)
         for metric in self.config['metrics']:
             for k in self.config['topk']:
-                if metric in ['err']:
-                    results[f"{metric}@{k}"] = self.metric2func[metric](preds, k)
-                else:
-                    results[f"{metric}@{k}"] = self.metric2func[metric](pos_index, k)
+                results[f"{metric}@{k}"] = self.metric2func[metric](pos_index, k)
+        results['n_visited_items'] = n_visited_items
         return results
