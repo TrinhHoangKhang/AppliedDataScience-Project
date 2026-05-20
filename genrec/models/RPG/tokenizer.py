@@ -47,9 +47,13 @@ class RPGTokenizer(AbstractTokenizer):
         """
         Returns the number of digits for the tokenizer.
 
-        The number of digits is determined by the value of `rq_n_codebooks` in the configuration.
+        For Method 1 (subcategory_injection), the subcategory ID is appended as an
+        extra digit, so n_digit = n_codebook + 1. For all other modes it equals n_codebook.
         """
-        return self.config['n_codebook']
+        base = self.config['n_codebook']
+        if self.config.get('subcategory_append'):
+            return base + 1
+        return base
 
     @property
     def codebook_size(self):
@@ -209,7 +213,9 @@ class RPGTokenizer(AbstractTokenizer):
         for u8code in pq_codes:
             bs = faiss.BitstringReader(faiss.swig_ptr(u8code), n_bytes)
             code = []
-            for i in range(self.n_digit):
+            # Always read exactly n_codebook digits from the OPQ bitstream,
+            # regardless of n_digit (which may be n_codebook+1 for injection).
+            for i in range(self.config['n_codebook']):
                 code.append(bs.read(self.n_codebook_bits))
             faiss_sem_ids.append(code)
         pq_codes = np.array(faiss_sem_ids)
@@ -382,20 +388,20 @@ class RPGTokenizer(AbstractTokenizer):
             training_item_mask = self._get_items_for_training(dataset)
             self._generate_semantic_id_opq(sent_embs, base_sem_ids_path, training_item_mask)
 
-        # Method 1 — Subcategory Injection
-        if self.config.get('subcategory_injection'):
+        # Method 1 — Subcategory Append
+        if self.config.get('subcategory_append'):
             injected_sem_ids_path = os.path.join(
                 dataset.cache_dir, 'processed',
-                f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}.subcat_injected.sem_ids'
+                f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}.subcat_append.sem_ids'
             )
             if not os.path.exists(injected_sem_ids_path):
                 self.log(f'[TOKENIZER] Loading raw semantic IDs from {base_sem_ids_path}...')
                 item2sem_ids = json.load(open(base_sem_ids_path, 'r'))
-                self.log('[TOKENIZER] Applying subcategory injection to digit 0...')
+                self.log('[TOKENIZER] Appending subcategory ID as extra digit...')
                 item2subcat = self._assign_subcategories(dataset)
                 for item in item2sem_ids:
                     sem_id = list(item2sem_ids[item])
-                    sem_id[0] = item2subcat.get(item, 0)  # 0-indexed, fits within codebook slot
+                    sem_id.append(item2subcat.get(item, 0))  # append as digit n_codebook
                     item2sem_ids[item] = tuple(sem_id)
                 self.log(f'[TOKENIZER] Saving injected semantic IDs to {injected_sem_ids_path}...')
                 with open(injected_sem_ids_path, 'w') as f:

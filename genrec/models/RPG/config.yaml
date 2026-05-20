@@ -34,9 +34,10 @@ opq_use_gpu: False
 opq_gpu_id: 0
 faiss_omp_num_threads: 32
 
-# ── Method 1: Subcategory Injection ──────────────────────────────────────────
-# Overwrites digit 0 of each item's semantic ID with its subcategory ID (0-3).
-subcategory_injection: false
+# ── Method 1: Subcategory Append ────────────────────────────────────────────
+# Appends the subcategory ID (0-3) as an extra digit to each item's semantic ID,
+# making it n_codebook+1 digits long. All original OPQ digits are preserved.
+subcategory_append: false
 
 # ── Method 2: Subcategory Partition ──────────────────────────────────────────
 subcategory_partition: false
