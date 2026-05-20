@@ -51,9 +51,7 @@ class RPGTokenizer(AbstractTokenizer):
         extra digit, so n_digit = n_codebook + 1. For all other modes it equals n_codebook.
         """
         base = self.config['n_codebook']
-        if self.config.get('subcategory_append'):
-            return base + 2
-        return base
+        return base + int(self.config.get('subcategory_append') or 0)
 
     @property
     def codebook_size(self):
@@ -389,21 +387,22 @@ class RPGTokenizer(AbstractTokenizer):
             self._generate_semantic_id_opq(sent_embs, base_sem_ids_path, training_item_mask)
 
         # Method 1 — Subcategory Append
-        if self.config.get('subcategory_append'):
+        n_append = int(self.config.get('subcategory_append') or 0)
+        if n_append > 0:
             injected_sem_ids_path = os.path.join(
                 dataset.cache_dir, 'processed',
-                f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}.subcat_append2.sem_ids'
+                f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}.subcat_append{n_append}.sem_ids'
             )
             if not os.path.exists(injected_sem_ids_path):
                 self.log(f'[TOKENIZER] Loading raw semantic IDs from {base_sem_ids_path}...')
                 item2sem_ids = json.load(open(base_sem_ids_path, 'r'))
-                self.log('[TOKENIZER] Appending subcategory ID as two extra digits...')
+                self.log(f'[TOKENIZER] Appending subcategory ID as {n_append} extra digit(s)...')
                 item2subcat = self._assign_subcategories(dataset)
                 for item in item2sem_ids:
                     sem_id = list(item2sem_ids[item])
                     subcat = item2subcat.get(item, 0)
-                    sem_id.append(subcat)  # digit n_codebook
-                    sem_id.append(subcat)  # digit n_codebook+1
+                    for _ in range(n_append):
+                        sem_id.append(subcat)
                     item2sem_ids[item] = tuple(sem_id)
                 self.log(f'[TOKENIZER] Saving injected semantic IDs to {injected_sem_ids_path}...')
                 with open(injected_sem_ids_path, 'w') as f:

@@ -35,9 +35,10 @@ opq_gpu_id: 0
 faiss_omp_num_threads: 32
 
 # ── Method 1: Subcategory Append ────────────────────────────────────────────
-# Appends the subcategory ID (0-3) as an extra digit to each item's semantic ID,
-# making it n_codebook+1 digits long. All original OPQ digits are preserved.
-subcategory_append: false
+# Appends the subcategory ID (0-3) N times as extra digits to each item's semantic ID,
+# making it n_codebook+N digits long. All original OPQ digits are preserved.
+# Set to 0 (or false) to disable. Set to 1, 2, 3, ... to append that many digits.
+subcategory_append: 0
 
 # ── Method 2: Subcategory Partition ──────────────────────────────────────────
 subcategory_partition: false
