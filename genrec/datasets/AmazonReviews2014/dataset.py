@@ -305,6 +305,93 @@ class AmazonReviews2014(AbstractDataset):
             item2meta[item] = meta_sentence
         return item2meta
 
+    def _prune_item_seqs(
+        self,
+        all_item_seqs: dict,
+        output_path: str,
+        top_n: int,
+        min_seq_len: int = 3
+    ) -> tuple[dict, dict]:
+        """
+        Prunes the item sequences to keep only the top-N most interacted items,
+        then removes users whose sequences become too short.
+
+        Args:
+            all_item_seqs (dict): A dictionary of user -> list of items (raw ASINs).
+            output_path (str): Path to cache the pruned results.
+            top_n (int): Number of most-interacted items to keep.
+            min_seq_len (int): Minimum sequence length required to keep a user.
+
+        Returns:
+            pruned_item_seqs (dict): Pruned user-item sequences (raw ASINs).
+            id_mapping (dict): Remapped IDs for the pruned set.
+        """
+        seq_file = os.path.join(output_path, f'all_item_seqs.pruned_{top_n}.json')
+        id_mapping_file = os.path.join(output_path, f'id_mapping.pruned_{top_n}.json')
+        if os.path.exists(seq_file) and os.path.exists(id_mapping_file):
+            self.log(f'[DATASET] Pruned data (top {top_n}) already exists, loading...')
+            with open(seq_file, 'r') as f:
+                pruned_item_seqs = json.load(f)
+            with open(id_mapping_file, 'r') as f:
+                id_mapping = json.load(f)
+            return pruned_item_seqs, id_mapping
+
+        self.log(f'[DATASET] Pruning to top {top_n} items...')
+
+        # Count item frequencies across all sequences
+        item_counts = defaultdict(int)
+        for items in all_item_seqs.values():
+            for item in items:
+                item_counts[item] += 1
+
+        # Keep top-N items by frequency
+        top_items = set(
+            item for item, _ in
+            sorted(item_counts.items(), key=lambda x: x[1], reverse=True)[:top_n]
+        )
+        self.log(f'[DATASET] Keeping {len(top_items)} items out of {len(item_counts)}')
+
+        # Filter sequences: remove non-top items, then drop short sequences
+        pruned_item_seqs = {}
+        for user, items in all_item_seqs.items():
+            filtered = [item for item in items if item in top_items]
+            if len(filtered) >= min_seq_len:
+                pruned_item_seqs[user] = filtered
+
+        self.log(
+            f'[DATASET] Kept {len(pruned_item_seqs)} users '
+            f'(removed {len(all_item_seqs) - len(pruned_item_seqs)} with seq_len < {min_seq_len})'
+        )
+
+        # Remap IDs from scratch for the pruned set
+        id_mapping = {
+            'user2id': {'[PAD]': 0},
+            'item2id': {'[PAD]': 0},
+            'id2user': ['[PAD]'],
+            'id2item': ['[PAD]']
+        }
+        for user, items in pruned_item_seqs.items():
+            if user not in id_mapping['user2id']:
+                id_mapping['user2id'][user] = len(id_mapping['id2user'])
+                id_mapping['id2user'].append(user)
+            for item in items:
+                if item not in id_mapping['item2id']:
+                    id_mapping['item2id'][item] = len(id_mapping['id2item'])
+                    id_mapping['id2item'].append(item)
+
+        self.log(
+            f'[DATASET] Pruned dataset: '
+            f'{len(id_mapping["user2id"]) - 1} users, '
+            f'{len(id_mapping["item2id"]) - 1} items'
+        )
+
+        with open(seq_file, 'w') as f:
+            json.dump(pruned_item_seqs, f)
+        with open(id_mapping_file, 'w') as f:
+            json.dump(id_mapping, f)
+
+        return pruned_item_seqs, id_mapping
+
     def _process_meta(
         self,
         input_path: str,
@@ -386,6 +473,14 @@ class AmazonReviews2014(AbstractDataset):
             input_path=reviews_localpath,
             output_path=processed_data_path
         )
+
+        # Optional: prune to top-N most interacted items
+        if self.config.get('prune_items') is not None:
+            self.all_item_seqs, self.id_mapping = self._prune_item_seqs(
+                all_item_seqs=self.all_item_seqs,
+                output_path=processed_data_path,
+                top_n=self.config['prune_items']
+            )
 
         self.item2meta = self._process_meta(
             input_path=meta_localpath,

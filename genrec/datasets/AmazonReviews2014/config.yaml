@@ -1,3 +1,4 @@
 category: Sports_and_Outdoors
 metadata: none  # none / raw / sentence
 split: leave_one_out  # leave_one_out
+prune_items: ~  # set to an integer (e.g. 1000) to keep only top-N most interacted items, ~ to disable
