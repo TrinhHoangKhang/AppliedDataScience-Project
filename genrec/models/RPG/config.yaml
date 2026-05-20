@@ -34,6 +34,11 @@ opq_use_gpu: False
 opq_gpu_id: 0
 faiss_omp_num_threads: 32
 
+# Subcategory injection
+# Set to true to overwrite digit 0 of each item's semantic ID with its subcategory ID
+# Set to false to run the baseline (pure OPQ semantic IDs)
+subcategory_injection: True
+
 # RPG configs
 #   model
 temperature: 0.07

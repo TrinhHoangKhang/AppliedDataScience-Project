@@ -222,6 +222,64 @@ class RPGTokenizer(AbstractTokenizer):
         with open(sem_ids_path, 'w') as f:
             json.dump(item2sem_ids, f)
 
+    def _assign_subcategories(self, dataset: AbstractDataset) -> dict:
+        """
+        Assigns a subcategory ID (0-indexed) to each item based on keyword matching
+        in the item's metadata sentence. Hardcoded for the Beauty category.
+
+        Subcategories:
+            0: Hair Care   — hair, shampoo, conditioner, styling, scalp, curl
+            1: Nail Care   — nail, nails, polish, manicure, pedicure
+            2: Skin Care   — moisturizer, serum, lotion, cleanser, cream, toner,
+                             anti-aging, facial, sunscreen, exfoliat
+            3: Makeup & Tools (catch-all) — makeup, brush, brushes, lipstick,
+                             mascara, foundation, fragrance, perfume, concealer
+
+        Args:
+            dataset (AbstractDataset): The dataset object containing item2meta.
+
+        Returns:
+            dict: A dictionary mapping item ASIN -> subcategory ID (0-indexed).
+        """
+        assert dataset.item2meta is not None, \
+            'item2meta is None — set metadata: sentence in config to use subcategory injection.'
+
+        # Order matters: first match wins. Put more specific categories first.
+        subcategory_keywords = [
+            (0, ['shampoo', 'conditioner', 'hair', 'styling', 'scalp', 'curl']),
+            (1, ['manicure', 'pedicure', 'nail polish', 'nail', 'nails', 'polish']),
+            (2, ['moisturizer', 'serum', 'sunscreen', 'exfoliat', 'toner',
+                  'cleanser', 'anti-aging', 'facial', 'lotion', 'cream']),
+            (3, ['lipstick', 'mascara', 'foundation', 'concealer', 'eyeshadow',
+                  'makeup', 'fragrance', 'perfume', 'brush', 'brushes']),
+        ]
+        n_subcategories = len(subcategory_keywords)
+
+        item2subcat = {}
+        unmatched = 0
+        for item, text in dataset.item2meta.items():
+            text_lower = text.lower()
+            assigned = None
+            for subcat_id, keywords in subcategory_keywords:
+                if any(kw in text_lower for kw in keywords):
+                    assigned = subcat_id
+                    break
+            if assigned is None:
+                assigned = n_subcategories - 1  # fallback: last category
+                unmatched += 1
+            item2subcat[item] = assigned
+
+        # Log distribution
+        from collections import Counter
+        dist = Counter(item2subcat.values())
+        names = ['Hair Care', 'Nail Care', 'Skin Care', 'Makeup & Tools']
+        self.log('[TOKENIZER] Subcategory distribution:')
+        for sid, name in enumerate(names):
+            self.log(f'  [{sid}] {name}: {dist[sid]} items')
+        self.log(f'  (fallback-assigned: {unmatched} items)')
+
+        return item2subcat
+
     def _sem_ids_to_tokens(self, item2sem_ids: dict) -> dict:
         """
         Converts semantic IDs to tokens.
@@ -251,9 +309,10 @@ class RPGTokenizer(AbstractTokenizer):
             dict: A dictionary mapping items to semantic IDs.
         """
         # Load semantic IDs
+        inject_suffix = '.subcat_injected' if self.config.get('subcategory_injection') else ''
         sem_ids_path = os.path.join(
             dataset.cache_dir, 'processed',
-            f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}.sem_ids'
+            f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}{inject_suffix}.sem_ids'
         )
 
         if not os.path.exists(sem_ids_path):
@@ -282,6 +341,16 @@ class RPGTokenizer(AbstractTokenizer):
 
         self.log(f'[TOKENIZER] Loading semantic IDs from {sem_ids_path}...')
         item2sem_ids = json.load(open(sem_ids_path, 'r'))
+
+        # Subcategory injection: overwrite digit 0 with the item's subcategory ID
+        if self.config.get('subcategory_injection'):
+            self.log('[TOKENIZER] Applying subcategory injection to digit 0...')
+            item2subcat = self._assign_subcategories(dataset)
+            for item in item2sem_ids:
+                sem_id = list(item2sem_ids[item])
+                sem_id[0] = item2subcat.get(item, 0)  # 0-indexed, fits within codebook slot
+                item2sem_ids[item] = tuple(sem_id)
+
         item2tokens = self._sem_ids_to_tokens(item2sem_ids)
 
         return item2tokens
