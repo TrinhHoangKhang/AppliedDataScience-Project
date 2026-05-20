@@ -227,14 +227,6 @@ class RPGTokenizer(AbstractTokenizer):
         Assigns a subcategory ID (0-indexed) to each item based on keyword matching
         in the item's metadata sentence. Hardcoded for the Beauty category.
 
-        Subcategories:
-            0: Hair Care   — hair, shampoo, conditioner, styling, scalp, curl
-            1: Nail Care   — nail, nails, polish, manicure, pedicure
-            2: Skin Care   — moisturizer, serum, lotion, cleanser, cream, toner,
-                             anti-aging, facial, sunscreen, exfoliat
-            3: Makeup & Tools (catch-all) — makeup, brush, brushes, lipstick,
-                             mascara, foundation, fragrance, perfume, concealer
-
         Args:
             dataset (AbstractDataset): The dataset object containing item2meta.
 
@@ -245,6 +237,7 @@ class RPGTokenizer(AbstractTokenizer):
             'item2meta is None — set metadata: sentence in config to use subcategory injection.'
 
         # Order matters: first match wins. Put more specific categories first.
+        # This is hardcoded, you can modify the keywords and categories as needed. The last category is the fallback.
         subcategory_keywords = [
             (0, ['shampoo', 'conditioner', 'hair', 'styling', 'scalp', 'curl']),
             (1, ['manicure', 'pedicure', 'nail polish', 'nail', 'nails', 'polish']),
@@ -308,14 +301,13 @@ class RPGTokenizer(AbstractTokenizer):
         Returns:
             dict: A dictionary mapping items to semantic IDs.
         """
-        # Load semantic IDs
-        inject_suffix = '.subcat_injected' if self.config.get('subcategory_injection') else ''
-        sem_ids_path = os.path.join(
+        # Raw OPQ sem IDs are always cached at the base path (no suffix)
+        base_sem_ids_path = os.path.join(
             dataset.cache_dir, 'processed',
-            f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}{inject_suffix}.sem_ids'
+            f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}.sem_ids'
         )
 
-        if not os.path.exists(sem_ids_path):
+        if not os.path.exists(base_sem_ids_path):
             # Load or encode sentence embeddings
             sent_emb_path = os.path.join(
                 dataset.cache_dir, 'processed',
@@ -335,22 +327,38 @@ class RPGTokenizer(AbstractTokenizer):
                 sent_embs = pca.fit_transform(sent_embs)
             self.log(f'[TOKENIZER] Sentence embeddings shape: {sent_embs.shape}')
 
-            # Generate semantic IDs
+            # Generate and save raw OPQ semantic IDs
             training_item_mask = self._get_items_for_training(dataset)
-            self._generate_semantic_id_opq(sent_embs, sem_ids_path, training_item_mask)
+            self._generate_semantic_id_opq(sent_embs, base_sem_ids_path, training_item_mask)
 
-        self.log(f'[TOKENIZER] Loading semantic IDs from {sem_ids_path}...')
-        item2sem_ids = json.load(open(sem_ids_path, 'r'))
-
-        # Subcategory injection: overwrite digit 0 with the item's subcategory ID
+        # Subcategory injection: load raw IDs, overwrite digit 0, save to injected path
         if self.config.get('subcategory_injection'):
-            self.log('[TOKENIZER] Applying subcategory injection to digit 0...')
-            item2subcat = self._assign_subcategories(dataset)
-            for item in item2sem_ids:
-                sem_id = list(item2sem_ids[item])
-                sem_id[0] = item2subcat.get(item, 0)  # 0-indexed, fits within codebook slot
-                item2sem_ids[item] = tuple(sem_id)
+            injected_sem_ids_path = os.path.join(
+                dataset.cache_dir, 'processed',
+                f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}.subcat_injected.sem_ids'
+            )
+            if not os.path.exists(injected_sem_ids_path):
+                self.log(f'[TOKENIZER] Loading raw semantic IDs from {base_sem_ids_path}...')
+                item2sem_ids = json.load(open(base_sem_ids_path, 'r'))
+                self.log('[TOKENIZER] Applying subcategory injection to digit 0...')
+                item2subcat = self._assign_subcategories(dataset)
+                for item in item2sem_ids:
+                    sem_id = list(item2sem_ids[item])
+                    sem_id[0] = item2subcat.get(item, 0)  # 0-indexed, fits within codebook slot
+                    item2sem_ids[item] = tuple(sem_id)
+                self.log(f'[TOKENIZER] Saving injected semantic IDs to {injected_sem_ids_path}...')
+                with open(injected_sem_ids_path, 'w') as f:
+                    json.dump(item2sem_ids, f)
+            else:
+                self.log(f'[TOKENIZER] Loading injected semantic IDs from {injected_sem_ids_path}...')
+                item2sem_ids = json.load(open(injected_sem_ids_path, 'r'))
+            sem_ids_path = injected_sem_ids_path
+        else:
+            self.log(f'[TOKENIZER] Loading semantic IDs from {base_sem_ids_path}...')
+            item2sem_ids = json.load(open(base_sem_ids_path, 'r'))
+            sem_ids_path = base_sem_ids_path
 
+        self.log(f'[TOKENIZER] Using semantic IDs from {sem_ids_path}')
         item2tokens = self._sem_ids_to_tokens(item2sem_ids)
 
         return item2tokens
