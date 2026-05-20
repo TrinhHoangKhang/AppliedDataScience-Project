@@ -42,7 +42,7 @@ subcategory_injection: True
 # RPG configs
 #   model
 temperature: 0.07
-num_beams: 50
+num_beams: 20
 n_edges: 50
 propagation_steps: 3
 #   decoding graph construction
