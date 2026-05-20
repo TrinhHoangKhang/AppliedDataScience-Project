@@ -28,7 +28,7 @@ layer_norm_epsilon: 1e-12
 initializer_range: 0.02
 
 # Semantic ID configs
-n_codebook: 16
+n_codebook: 8
 codebook_size: 256
 opq_use_gpu: False
 opq_gpu_id: 0
@@ -46,7 +46,7 @@ n_subcategories: 4
 #   model
 temperature: 0.07
 num_beams: 20
-n_edges: 50
+n_edges: 200
 propagation_steps: 3
 #   decoding graph construction
 chunk_size: 1024
