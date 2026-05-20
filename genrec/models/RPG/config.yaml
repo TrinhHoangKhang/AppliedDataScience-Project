@@ -28,16 +28,19 @@ layer_norm_epsilon: 1e-12
 initializer_range: 0.02
 
 # Semantic ID configs
-n_codebook: 32
+n_codebook: 16
 codebook_size: 256
 opq_use_gpu: False
 opq_gpu_id: 0
 faiss_omp_num_threads: 32
 
-# Subcategory injection
-# Set to true to overwrite digit 0 of each item's semantic ID with its subcategory ID
-# Set to false to run the baseline (pure OPQ semantic IDs)
-subcategory_injection: True
+# ── Method 1: Subcategory Injection ──────────────────────────────────────────
+# Overwrites digit 0 of each item's semantic ID with its subcategory ID (0-3).
+subcategory_injection: false
+
+# ── Method 2: Subcategory Partition ──────────────────────────────────────────
+subcategory_partition: false
+n_subcategories: 4
 
 # RPG configs
 #   model

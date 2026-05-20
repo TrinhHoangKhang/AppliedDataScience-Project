@@ -273,6 +273,53 @@ class RPGTokenizer(AbstractTokenizer):
 
         return item2subcat
 
+    def _apply_subcategory_partition(self, item2sem_ids: dict, dataset: AbstractDataset) -> dict:
+        """
+        Method 2 — Subcategory Partition.
+
+        OPQ is trained normally with the full codebook_size centroids (no quality loss).
+        Afterwards, each item's digit values are remapped into its subcategory's exclusive
+        zone using:
+
+            new_value = (raw_value % partition_size) + subcategory_id * partition_size
+
+        where partition_size = codebook_size // n_subcategories.
+
+        Example with codebook_size=256, n_subcategories=4 (partition_size=64):
+            subcategory 0 → digits remapped into [0,   63]
+            subcategory 1 → digits remapped into [64,  127]
+            subcategory 2 → digits remapped into [128, 191]
+            subcategory 3 → digits remapped into [192, 255]
+
+        This guarantees items of different subcategories never share a token on any digit,
+        making cross-category confusion structurally impossible in the decoding graph.
+        The modulo step compresses 256 → 64 distinct values per zone, which trades some
+        within-category granularity for strong categorical structure — but OPQ training
+        quality is fully preserved since it uses all 256 centroids.
+
+        Args:
+            item2sem_ids (dict): Raw OPQ semantic IDs (values in [0, codebook_size-1]).
+            dataset (AbstractDataset): Dataset containing item2meta.
+
+        Returns:
+            dict: Semantic IDs remapped into subcategory zones (values in [0, codebook_size-1]).
+        """
+        n_subcategories = self.config.get('n_subcategories', 4)
+        partition_size = self.codebook_size // n_subcategories
+
+        self.log(f'[TOKENIZER] Applying subcategory partition '
+                 f'(codebook_size={self.codebook_size}, n_subcategories={n_subcategories}, '
+                 f'partition_size={partition_size})...')
+
+        item2subcat = self._assign_subcategories(dataset)
+        for item in item2sem_ids:
+            subcat = item2subcat.get(item, 0)
+            offset = subcat * partition_size
+            # remap: compress raw value into zone via modulo, then shift to zone start
+            sem_id = [(v % partition_size) + offset for v in item2sem_ids[item]]
+            item2sem_ids[item] = tuple(sem_id)
+        return item2sem_ids
+
     def _sem_ids_to_tokens(self, item2sem_ids: dict) -> dict:
         """
         Converts semantic IDs to tokens.
@@ -302,6 +349,10 @@ class RPGTokenizer(AbstractTokenizer):
             dict: A dictionary mapping items to semantic IDs.
         """
         # Raw OPQ sem IDs are always cached at the base path (no suffix)
+        # For subcategory_partition, OPQ is trained with fewer centroids so
+        # it needs its own separate base cache.
+        # All methods (baseline, injection, partition) share the same base OPQ cache
+        # because OPQ is always trained with the full codebook_size centroids.
         base_sem_ids_path = os.path.join(
             dataset.cache_dir, 'processed',
             f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}.sem_ids'
@@ -327,11 +378,11 @@ class RPGTokenizer(AbstractTokenizer):
                 sent_embs = pca.fit_transform(sent_embs)
             self.log(f'[TOKENIZER] Sentence embeddings shape: {sent_embs.shape}')
 
-            # Generate and save raw OPQ semantic IDs
+            # Generate and save raw OPQ semantic IDs (always full codebook_size centroids)
             training_item_mask = self._get_items_for_training(dataset)
             self._generate_semantic_id_opq(sent_embs, base_sem_ids_path, training_item_mask)
 
-        # Subcategory injection: load raw IDs, overwrite digit 0, save to injected path
+        # Method 1 — Subcategory Injection
         if self.config.get('subcategory_injection'):
             injected_sem_ids_path = os.path.join(
                 dataset.cache_dir, 'processed',
@@ -353,6 +404,26 @@ class RPGTokenizer(AbstractTokenizer):
                 self.log(f'[TOKENIZER] Loading injected semantic IDs from {injected_sem_ids_path}...')
                 item2sem_ids = json.load(open(injected_sem_ids_path, 'r'))
             sem_ids_path = injected_sem_ids_path
+
+        # Method 2 — Subcategory Partition (post-hoc remapping, OPQ quality preserved)
+        elif self.config.get('subcategory_partition'):
+            partitioned_sem_ids_path = os.path.join(
+                dataset.cache_dir, 'processed',
+                f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}.subcat_partition.sem_ids'
+            )
+            if not os.path.exists(partitioned_sem_ids_path):
+                self.log(f'[TOKENIZER] Loading raw semantic IDs from {base_sem_ids_path}...')
+                item2sem_ids = json.load(open(base_sem_ids_path, 'r'))
+                item2sem_ids = self._apply_subcategory_partition(item2sem_ids, dataset)
+                self.log(f'[TOKENIZER] Saving partitioned semantic IDs to {partitioned_sem_ids_path}...')
+                with open(partitioned_sem_ids_path, 'w') as f:
+                    json.dump(item2sem_ids, f)
+            else:
+                self.log(f'[TOKENIZER] Loading partitioned semantic IDs from {partitioned_sem_ids_path}...')
+                item2sem_ids = json.load(open(partitioned_sem_ids_path, 'r'))
+            sem_ids_path = partitioned_sem_ids_path
+
+        # Baseline — pure OPQ
         else:
             self.log(f'[TOKENIZER] Loading semantic IDs from {base_sem_ids_path}...')
             item2sem_ids = json.load(open(base_sem_ids_path, 'r'))
