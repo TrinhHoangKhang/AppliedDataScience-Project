@@ -52,7 +52,7 @@ class RPGTokenizer(AbstractTokenizer):
         """
         base = self.config['n_codebook']
         if self.config.get('subcategory_append'):
-            return base + 1
+            return base + 2
         return base
 
     @property
@@ -392,16 +392,18 @@ class RPGTokenizer(AbstractTokenizer):
         if self.config.get('subcategory_append'):
             injected_sem_ids_path = os.path.join(
                 dataset.cache_dir, 'processed',
-                f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}.subcat_append.sem_ids'
+                f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}.subcat_append2.sem_ids'
             )
             if not os.path.exists(injected_sem_ids_path):
                 self.log(f'[TOKENIZER] Loading raw semantic IDs from {base_sem_ids_path}...')
                 item2sem_ids = json.load(open(base_sem_ids_path, 'r'))
-                self.log('[TOKENIZER] Appending subcategory ID as extra digit...')
+                self.log('[TOKENIZER] Appending subcategory ID as two extra digits...')
                 item2subcat = self._assign_subcategories(dataset)
                 for item in item2sem_ids:
                     sem_id = list(item2sem_ids[item])
-                    sem_id.append(item2subcat.get(item, 0))  # append as digit n_codebook
+                    subcat = item2subcat.get(item, 0)
+                    sem_id.append(subcat)  # digit n_codebook
+                    sem_id.append(subcat)  # digit n_codebook+1
                     item2sem_ids[item] = tuple(sem_id)
                 self.log(f'[TOKENIZER] Saving injected semantic IDs to {injected_sem_ids_path}...')
                 with open(injected_sem_ids_path, 'w') as f:
