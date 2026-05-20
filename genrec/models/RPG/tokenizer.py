@@ -3,7 +3,6 @@ import math
 import json
 import numpy as np
 from tqdm import tqdm
-from sentence_transformers import SentenceTransformer
 
 from genrec.dataset import AbstractDataset
 from genrec.tokenizer import AbstractTokenizer
@@ -100,6 +99,7 @@ class RPGTokenizer(AbstractTokenizer):
             meta_sentences.append(dataset.item2meta[dataset.id_mapping['id2item'][i]])
 
         if 'sentence-transformers' in self.config['sent_emb_model']:
+            from sentence_transformers import SentenceTransformer
             sent_emb_model = SentenceTransformer(
                 self.config['sent_emb_model']
             ).to(self.config['device'])
